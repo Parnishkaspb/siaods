@@ -1,198 +1,190 @@
-package extendiblehashing
+package extendablehash
 
 import (
+	"encoding/json"
 	"fmt"
-	"hash/fnv"
+	"io/ioutil"
+	"os"
 )
 
-type keyValue struct {
-	key   string
-	value any
-}
+const (
+	BUCKET_SIZE  = 100
+	STORAGE_PATH = "./buckets/"
+)
 
-// Bucket - структура для хранения пар ключ-значение
 type Bucket struct {
-	table   []keyValue
-	ld      int
-	maxSize int
+	Id         int                    `json:"id"`
+	Items      map[string]interface{} `json:"items"`
+	LocalDepth int                    `json:"local_depth"`
 }
 
-// ExtendibleHash - структура для расширяемого хеширования.
-type ExtendibleHash struct {
-	directories []*Bucket
-	gd          int
+type ExtendableHashTable struct {
+	// Директория: отображает индекс (нижние GlobalDepth бит) на указатель на бакет.
+	Buckets      map[int]*Bucket
+	GlobalDepth  int
+	nextBucketId int
 }
 
-// hashKey - первичное хеширование
-func hashKey(key string) int {
-	h := fnv.New32a()
-	h.Write([]byte(key))
-	return int(h.Sum32())
-}
-
-// secondHash - вторичное хеширование (Необходим для XOR)
-func secondHash(key string) int {
-	h := fnv.New32a()
-	h.Write([]byte("salt-" + key)) // Дополняем строку для уникальности
-	return int(h.Sum32())
-}
-
-// finalHash - объединяем два хеша через XOR
-func finalHash(key string) int {
-	return hashKey(key) ^ secondHash(key)
-}
-
-// NewExtendibleHash создает новую хеш-таблицу.
-func NewExtendibleHash(initialGD int, maxSize int) *ExtendibleHash {
-	size := 1 << initialGD // 2^GD директорий
-	directories := make([]*Bucket, size)
-
-	for i := range directories {
-		directories[i] = &Bucket{
-			table:   make([]keyValue, 0, maxSize), // Изначально пустой
-			ld:      initialGD,
-			maxSize: maxSize,
+// NewExtendableHashTable создаёт новую расширяемую хэш‑таблицу и инициализирует 2^GlobalDepth бакетов.
+func NewExtendableHashTable() *ExtendableHashTable {
+	os.MkdirAll(STORAGE_PATH, os.ModePerm)
+	eht := &ExtendableHashTable{
+		Buckets:      make(map[int]*Bucket),
+		GlobalDepth:  1,
+		nextBucketId: 0,
+	}
+	// Инициализируем 2^GlobalDepth бакетов
+	for i := 0; i < (1 << eht.GlobalDepth); i++ {
+		b := &Bucket{
+			Id:         eht.nextBucketId,
+			Items:      make(map[string]interface{}),
+			LocalDepth: 1,
 		}
+		eht.nextBucketId++
+		eht.Buckets[i] = b
+		eht.saveBucketToFile(b)
 	}
-
-	return &ExtendibleHash{
-		directories: directories,
-		gd:          initialGD,
-	}
+	return eht
 }
 
-// InsertKey добавляет ключ в таблицу.
-func (eh *ExtendibleHash) InsertKey(key string, value any) error {
-	h := finalHash(key)
-	index := h & ((1 << eh.gd) - 1)
-	bucket := eh.directories[index]
+// hash – функция хэширования (алгоритм FNV-1a)
+func hash(s string) uint64 {
+	var h uint64 = 14695981039346656037
+	for _, c := range s {
+		h ^= uint64(c)
+		h *= 1099511628211
+	}
+	return h
+}
 
-	// Если ключ уже есть — обновляем
-	for i, kv := range bucket.table {
-		if kv.key == key {
-			bucket.table[i].value = value
-			return nil
+// getBKey вычисляет индекс в директории по ключу с учётом текущей глобальной глубины.
+func (eht *ExtendableHashTable) getBKey(key string) int {
+	return int(hash(key) & ((1 << eht.GlobalDepth) - 1))
+}
+
+// Insert вставляет пару ключ-значение. Если после вставки бакет переполнен,
+// запускается обработка переполнения (разделение бакета и/или расширение директории).
+func (eht *ExtendableHashTable) Insert(key string, value interface{}) {
+	for {
+		dirIndex := eht.getBKey(key)
+		bucket := eht.loadBucketFromFile(dirIndex)
+		bucket.Items[key] = value
+		eht.saveBucketToFile(bucket)
+		if len(bucket.Items) <= BUCKET_SIZE {
+			break
 		}
+		eht.handleOverflow(dirIndex)
 	}
-
-	// Если есть место — вставляем
-	if len(bucket.table) < bucket.maxSize {
-		bucket.table = append(bucket.table, keyValue{key, value})
-		return nil
-	}
-
-	// Бакет переполнен -> split
-	eh.splitBucket(index)
-
-	// 🔹 Пересчитываем индекс, но теперь проверяем, есть ли место
-	newIndex := h & ((1 << eh.gd) - 1)
-	newBucket := eh.directories[newIndex]
-
-	if len(newBucket.table) < newBucket.maxSize {
-		newBucket.table = append(newBucket.table, keyValue{key, value})
-		return nil
-	}
-
-	for i := 0; i < len(eh.directories); i++ {
-		if len(eh.directories[i].table) < eh.directories[i].maxSize {
-			eh.directories[i].table = append(eh.directories[i].table, keyValue{key, value})
-			return nil
-		}
-	}
-
-	return fmt.Errorf("не удалось вставить ключ %s после разбиения", key)
 }
 
-func (eh *ExtendibleHash) expandDirectory() {
-	oldSize := 1 << eh.gd
-	eh.gd++
-	newSize := 1 << eh.gd
-
-	newDirs := make([]*Bucket, newSize)
-
-	// Дублируем ссылки на старые бакеты в новой таблице
-	for i := 0; i < newSize; i++ {
-		newDirs[i] = eh.directories[i%oldSize]
+// Get возвращает значение по ключу. Если ключ не найден – выводится предупреждение.
+func (eht *ExtendableHashTable) Get(key string) (interface{}, bool) {
+	dirIndex := eht.getBKey(key)
+	bucket := eht.loadBucketFromFile(dirIndex)
+	value, exists := bucket.Items[key]
+	if !exists {
+		fmt.Printf("[WARNING] Key %s not found in bucket %d\n", key, dirIndex)
 	}
-
-	eh.directories = newDirs
+	return value, exists
 }
 
-func (eh *ExtendibleHash) splitBucket(index int) {
-	bucket := eh.directories[index]
-
-	// Проверка: переполнение бакета
-	if len(bucket.table) < bucket.maxSize {
-		return
+// expandDirectory расширяет директорию, удваивая число указателей, копируя старые бакеты.
+func (eht *ExtendableHashTable) expandDirectory() {
+	oldBuckets := make(map[int]*Bucket)
+	for k, v := range eht.Buckets {
+		oldBuckets[k] = v
 	}
-
-	// Локальная равна глобальной -> расширяем таблицу
-	if bucket.ld == eh.gd {
-		eh.expandDirectory()
+	oldGlobalDepth := eht.GlobalDepth
+	eht.GlobalDepth++
+	eht.Buckets = make(map[int]*Bucket)
+	for i := 0; i < (1 << eht.GlobalDepth); i++ {
+		eht.Buckets[i] = oldBuckets[i&((1<<oldGlobalDepth)-1)]
 	}
+}
 
-	// Создание нового бакета с увеличенной локальной глубиной
+// handleOverflow проверяет переполнение бакета по индексу dirIndex.
+// Если локальная глубина бакета равна глобальной, сначала расширяется директория, затем происходит разделение бакета.
+func (eht *ExtendableHashTable) handleOverflow(dirIndex int) {
+	bucket := eht.loadBucketFromFile(dirIndex)
+	if bucket.LocalDepth == eht.GlobalDepth {
+		eht.expandDirectory()
+	}
+	eht.splitBucket(dirIndex)
+}
+
+// splitBucket разделяет бакет, который находится по индексу dirIndex в директории.
+// Для разделения вычисляется исходный шаблон (pattern) бакета по его старой локальной глубине (oldLocalDepth).
+// Затем локальная глубина старого бакета увеличивается, создаётся новый бакет,
+// и обновляются все индексы в директории, для которых (i & ((1 << oldLocalDepth) - 1)) совпадает с pattern:
+// если бит на позиции oldLocalDepth равен 1, то этот индекс указывает на новый бакет, иначе – на старый.
+func (eht *ExtendableHashTable) splitBucket(dirIndex int) {
+	oldBucket := eht.loadBucketFromFile(dirIndex)
+	oldLocalDepth := oldBucket.LocalDepth
+	// Вычисляем шаблон бакета по его старой локальной глубине.
+	pattern := dirIndex & ((1 << oldLocalDepth) - 1)
+	// Увеличиваем локальную глубину старого бакета.
+	oldBucket.LocalDepth++
+	newLocalDepth := oldBucket.LocalDepth
+	// Создаём новый бакет с уникальным идентификатором.
 	newBucket := &Bucket{
-		table:   make([]keyValue, 0, bucket.maxSize),
-		ld:      bucket.ld + 1,
-		maxSize: bucket.maxSize,
+		Id:         eht.nextBucketId,
+		Items:      make(map[string]interface{}),
+		LocalDepth: newLocalDepth,
 	}
-
-	// Увеличиваем локальную глубину старого бакета
-	bucket.ld++
-
-	oldKeys := bucket.table
-	bucket.table = make([]keyValue, 0, bucket.maxSize)
-
-	// Перераспределение ключей между старым и новым бакетом
-	for _, kv := range oldKeys {
-		newIndex := finalHash(kv.key) & ((1 << bucket.ld) - 1)
-		if newIndex == index {
-			bucket.table = append(bucket.table, kv)
-		} else {
-			newBucket.table = append(newBucket.table, kv)
-		}
-	}
-
-	// Обновление ссылок в Директории
-	for i := range eh.directories {
-		if (i & ((1 << (bucket.ld - 1)) - 1)) == index {
-			if (i & (1 << (bucket.ld - 1))) == 0 {
-				eh.directories[i] = bucket
+	eht.nextBucketId++
+	// Обновляем указатели в директории для всех индексов, которые раньше указывали на старый бакет.
+	// Для каждого i, если (i & ((1 << oldLocalDepth) - 1)) == pattern, то:
+	// - если бит на позиции oldLocalDepth (новый бит) равен 1, то назначаем новый бакет;
+	// - иначе оставляем старый бакет.
+	for i := 0; i < (1 << eht.GlobalDepth); i++ {
+		if (i & ((1 << oldLocalDepth) - 1)) == pattern {
+			if (i & (1 << oldLocalDepth)) != 0 {
+				eht.Buckets[i] = newBucket
 			} else {
-				eh.directories[i] = newBucket
+				eht.Buckets[i] = oldBucket
 			}
 		}
 	}
-}
-
-// Lookup проверяет наличие ключа в таблице.
-func (eh *ExtendibleHash) Lookup(key string) (bool, any) {
-	h := finalHash(key) // XOR-хеш для поиска
-	index := h & ((1 << eh.gd) - 1)
-	bucket := eh.directories[index]
-
-	for _, kv := range bucket.table {
-		if kv.key == key {
-			return true, kv.value
+	// Перераспределяем ключи: для каждого ключа из старого бакета, если бит на позиции oldLocalDepth в хэше равен 1,
+	// переносим запись в новый бакет.
+	for key, value := range oldBucket.Items {
+		if ((hash(key) >> oldLocalDepth) & 1) == 1 {
+			newBucket.Items[key] = value
+			delete(oldBucket.Items, key)
 		}
 	}
-
-	return false, nil
+	eht.saveBucketToFile(oldBucket)
+	eht.saveBucketToFile(newBucket)
 }
 
-// DeleteKey удаляет ключ из хеш-таблицы.
-func (eh *ExtendibleHash) DeleteKey(key string) error {
-	h := finalHash(key)
-	index := h & ((1 << eh.gd) - 1)
-	bucket := eh.directories[index]
+// saveBucketToFile сохраняет бакет b в файл с именем, основанным на его уникальном Id.
+func (eht *ExtendableHashTable) saveBucketToFile(b *Bucket) {
+	filePath := fmt.Sprintf("%s%d.json", STORAGE_PATH, b.Id)
+	data, err := json.MarshalIndent(b, "", "  ")
+	if err != nil {
+		fmt.Println("Ошибка при маршалинге бакета:", err)
+		return
+	}
+	err = ioutil.WriteFile(filePath, data, os.ModePerm)
+	if err != nil {
+		fmt.Println("Ошибка при сохранении бакета:", err)
+	}
+}
 
-	for i, kv := range bucket.table {
-		if kv.key == key {
-			bucket.table = append(bucket.table[:i], bucket.table[i+1:]...)
-			return nil
+// loadBucketFromFile загружает бакет, на который ссылается директория по индексу dirIndex,
+// используя для имени файла уникальный Id бакета.
+func (eht *ExtendableHashTable) loadBucketFromFile(dirIndex int) *Bucket {
+	bucket := eht.Buckets[dirIndex]
+	filePath := fmt.Sprintf("%s%d.json", STORAGE_PATH, bucket.Id)
+	data, err := ioutil.ReadFile(filePath)
+	if err == nil {
+		var b Bucket
+		if err := json.Unmarshal(data, &b); err == nil {
+			eht.Buckets[dirIndex] = &b
+			return &b
 		}
 	}
-
-	return fmt.Errorf("ключ %s не найден", key)
+	// Если не удалось прочитать файл, сохраняем текущий бакет и возвращаем его.
+	eht.saveBucketToFile(bucket)
+	return bucket
 }

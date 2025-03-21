@@ -1,204 +1,174 @@
-package extendiblehashing
+package extendablehash
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
+	"sort"
 	"testing"
+	"time"
 )
 
-//func TestExtendibleHashing(t *testing.T) {
-//	tests := []struct {
-//		name           string
-//		keysToInsert   []string
-//		valuesToInsert []any
-//		keysToFind     []string
-//		expectedFound  map[string]bool
-//		initialGD      int
-//		maxSize        int
-//	}{
-//		{
-//			name:           "InitialState",
-//			keysToInsert:   []string{},
-//			valuesToInsert: []any{},
-//			keysToFind:     []string{},
-//			expectedFound:  map[string]bool{},
-//			initialGD:      2,
-//			maxSize:        2,
-//		},
-//		{
-//			name:           "InsertAndFind",
-//			keysToInsert:   []string{"apple", "banana", "cherry"},
-//			valuesToInsert: []any{1, 2, 3},
-//			keysToFind:     []string{"apple", "banana", "cherry", "grape"},
-//			expectedFound:  map[string]bool{"apple": true, "banana": true, "cherry": true, "grape": false},
-//			initialGD:      2,
-//			maxSize:        2,
-//		},
-//		{
-//			name:           "CollisionHandling",
-//			keysToInsert:   []string{"key1", "key2", "key3", "key4", "key5"},
-//			valuesToInsert: []any{10, 20, 30, 40, 50},
-//			keysToFind:     []string{"key1", "key2", "key3", "key4", "key5"},
-//			expectedFound:  map[string]bool{"key1": true, "key2": true, "key3": true, "key4": true, "key5": true},
-//			initialGD:      2,
-//			maxSize:        2,
-//		},
-//	}
-//
-//	for _, test := range tests {
-//		t.Run(test.name, func(t *testing.T) {
-//			eh := NewExtendibleHash(test.initialGD, test.maxSize)
-//
-//			for i, key := range test.keysToInsert {
-//				err := eh.InsertKey(key, test.valuesToInsert[i])
-//				assert.NoError(t, err, "Ошибка при вставке ключа %s", key)
-//			}
-//
-//			for key, expected := range test.expectedFound {
-//				found, _ := eh.Lookup(key)
-//				assert.Equal(t, expected, found, "Ключ %s должен находиться: %v", key, expected)
-//			}
-//		})
-//	}
-//}
-
-func generateLargeTestData(n int) ([]string, []any, map[string]bool) {
-	keys := make([]string, n)
-	values := make([]any, n)
-	expectedFound := make(map[string]bool)
-
-	for i := 0; i < n; i++ {
-		keys[i] = fmt.Sprintf("key%d", i)
-		values[i] = i
-		expectedFound[keys[i]] = true
+func computeStats(durations []time.Duration) (mean, q1, median, q3 time.Duration) {
+	n := len(durations)
+	if n == 0 {
+		return 0, 0, 0, 0
 	}
 
-	// Добавляем один отсутствующий ключ для проверки поиска
-	expectedFound["missing_key"] = false
+	// Сортируем по возрастанию
+	sort.Slice(durations, func(i, j int) bool {
+		return durations[i] < durations[j]
+	})
 
-	return keys, values, expectedFound
+	// Сумма всех измерений
+	var total time.Duration
+	for _, d := range durations {
+		total += d
+	}
+
+	// Среднее (мат. ожидание)
+	mean = total / time.Duration(n)
+
+	// Квартили (наивный вариант для примера)
+	q1 = durations[n/4]
+	median = durations[n/2]
+	q3 = durations[(3*n)/4]
+
+	return mean, q1, median, q3
 }
 
-func TestExtendibleHashing(t *testing.T) {
-	largeKeys, largeValues, expectedLargeFound := generateLargeTestData(10000)
+func TestExtendableHash(t *testing.T) {
+	t.Run("smoke test", func(t *testing.T) {
+		hash := NewExtendableHashTable()
 
-	tests := []struct {
-		name           string
-		keysToInsert   []string
-		valuesToInsert []any
-		keysToFind     []string
-		expectedFound  map[string]bool
-		initialGD      int
-		maxSize        int
-	}{
-		{
-			name:           "InitialState",
-			keysToInsert:   []string{},
-			valuesToInsert: []any{},
-			keysToFind:     []string{},
-			expectedFound:  map[string]bool{},
-			initialGD:      2,
-			maxSize:        2,
-		},
-		{
-			name:           "InsertAndFind_Large",
-			keysToInsert:   largeKeys,
-			valuesToInsert: largeValues,
-			keysToFind:     append(largeKeys[:100], "missing_key"),
-			expectedFound:  expectedLargeFound,
-			initialGD:      2,
-			maxSize:        2,
-		},
-		{
-			name:           "CollisionHandling_Large",
-			keysToInsert:   largeKeys,
-			valuesToInsert: largeValues,
-			keysToFind:     largeKeys[:100],
-			expectedFound:  expectedLargeFound,
-			initialGD:      2,
-			maxSize:        4,
-		},
-	}
+		hash.Insert("1", "value1")
+		hash.Insert("2", "value2")
+		hash.Insert("3", "value3")
+		hash.Insert("4", "value4")
+		hash.Insert("5", "value5")
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			eh := NewExtendibleHash(test.initialGD, test.maxSize)
+		hash.Insert("6", "value6")
+		hash.Insert("7", "value7")
 
-			for i, key := range test.keysToInsert {
-				err := eh.InsertKey(key, test.valuesToInsert[i])
-				assert.NoError(t, err, "Ошибка при вставке ключа %s", key)
+		tests := []struct {
+			key      string
+			expected string
+		}{
+			{"1", "value1"},
+			{"2", "value2"},
+			{"3", "value3"},
+			{"4", "value4"},
+			{"5", "value5"},
+			{"6", "value6"},
+			{"7", "value7"},
+		}
+
+		for _, test := range tests {
+			value, exists := hash.Get(test.key)
+			if !exists || value != test.expected {
+				t.Errorf("Expected %v for key %v, got %v", test.expected, test.key, value)
 			}
+		}
 
-			for _, key := range test.keysToFind {
-				found, _ := eh.Lookup(key)
-				assert.Equal(t, test.expectedFound[key], found, "Ключ %s должен находиться: %v", key, test.expectedFound[key])
+		if _, exists := hash.Get("3123"); exists {
+			t.Error("Expected not to find a nonexistent key")
+		}
+	})
+
+	t.Run("correct values", func(t *testing.T) {
+		const size = 800
+
+		data := make(map[string]string, size)
+		keys := make([]string, size)
+
+		p_hash := NewExtendableHashTable()
+
+		for i := 0; i < size; i++ {
+			key := fmt.Sprintf("key%09d", i)
+			value := fmt.Sprintf("value%d", i)
+			data[key] = value
+			keys[i] = key
+			p_hash.Insert(key, value)
+		}
+
+		for idx := range p_hash.Buckets {
+			bucket := p_hash.loadBucketFromFile(idx)
+			if len(bucket.Items) > BUCKET_SIZE {
+				t.Errorf("Bucket #%b len: %v\n", idx, len(bucket.Items))
 			}
+		}
+
+		for key, value := range data {
+			if got, exists := p_hash.Get(key); !exists || got != value {
+				t.Errorf("Key %v: expected %v, got %v", key, value, got)
+			}
+		}
+	})
+}
+
+func BenchmarkInsert(b *testing.B) {
+	sizes := []int{200, 400, 800}
+
+	for _, size := range sizes {
+		data := make(map[string]string, size)
+		for i := 0; i < size; i++ {
+			data[fmt.Sprintf("key%09d", i)] = fmt.Sprintf("value%d", i)
+		}
+
+		b.Run(fmt.Sprintf("Insert-%d", size), func(b *testing.B) {
+			// В бенчмарках b.N часто используется для "прогона" несколько раз,
+			// но здесь показываем пример на 1 прогон для наглядности.
+			// Если хотите использовать b.N, можно обернуть цикл в for i := 0; i < b.N; i++ { ... }
+			// и аккумулировать результаты.
+
+			eh := NewExtendableHashTable()
+			durations := make([]time.Duration, 0, size)
+
+			// Измеряем время каждой операции
+			startAll := time.Now()
+			for key, value := range data {
+				startOp := time.Now()
+				eh.Insert(key, value)
+				durations = append(durations, time.Since(startOp))
+			}
+			totalElapsed := time.Since(startAll)
+
+			mean, q1, median, q3 := computeStats(durations)
+
+			b.Logf("Insert %d items: total=%v mean=%v q1=%v median=%v q3=%v",
+				size, totalElapsed, mean, q1, median, q3)
 		})
 	}
 }
 
-// Бенчмарки
-func BenchmarkExtendibleHashInsert(b *testing.B) {
-	benchmarks := []struct {
-		name           string
-		keysToInsert   []string
-		valuesToInsert []any
-		initialGD      int
-		maxSize        int
-	}{
-		{
-			name:           "InitialState",
-			keysToInsert:   []string{},
-			valuesToInsert: []any{},
-			initialGD:      2,
-			maxSize:        2,
-		},
-		{
-			name:           "InsertAndFind",
-			keysToInsert:   []string{"apple", "banana", "cherry"},
-			valuesToInsert: []any{1, 2, 3},
-			initialGD:      2,
-			maxSize:        2,
-		},
-	}
+func BenchmarkGet(b *testing.B) {
+	sizes := []int{200, 400, 800}
 
-	for _, bm := range benchmarks {
-		b.Run(bm.name, func(b *testing.B) {
-			eh := NewExtendibleHash(bm.initialGD, bm.maxSize)
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				for j, key := range bm.keysToInsert {
-					eh.InsertKey(key, bm.valuesToInsert[j])
-				}
+	for _, size := range sizes {
+		// Готовим данные
+		eh := NewExtendableHashTable()
+		keys := make([]string, size)
+
+		for i := 0; i < size; i++ {
+			key := fmt.Sprintf("key%09d", i)
+			keys[i] = key
+			eh.Insert(key, fmt.Sprintf("value%d", i))
+		}
+
+		b.Run(fmt.Sprintf("Get-%d", size), func(b *testing.B) {
+			durations := make([]time.Duration, 0, 10000)
+
+			startAll := time.Now()
+			for i := 0; i < 10000; i++ {
+				key := keys[i%size]
+				startOp := time.Now()
+				_, _ = eh.Get(key)
+				durations = append(durations, time.Since(startOp))
 			}
+			totalElapsed := time.Since(startAll)
+
+			mean, q1, median, q3 := computeStats(durations)
+
+			b.Logf("Get %d items (10k gets): total=%v mean=%v q1=%v median=%v q3=%v",
+				size, totalElapsed, mean, q1, median, q3)
 		})
-	}
-}
-
-func BenchmarkExtendibleHashFind(b *testing.B) {
-	keys := []string{"apple", "banana", "cherry", "grape"}
-	values := []any{1, 2, 3}
-	eh := NewExtendibleHash(2, 2)
-	for i := range values {
-		eh.InsertKey(keys[i], values[i])
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = eh.Lookup(keys[i%len(keys)])
-	}
-}
-
-func BenchmarkExtendibleHashDelete(b *testing.B) {
-	keys := []string{"apple", "banana", "cherry"}
-	values := []any{1, 2, 3}
-	eh := NewExtendibleHash(2, 2)
-	for i := range values {
-		eh.InsertKey(keys[i], values[i])
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		eh.DeleteKey(keys[i%len(keys)])
 	}
 }
