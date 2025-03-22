@@ -16,42 +16,6 @@ type Set[v_type SetValueType] struct {
 	Values map[v_type]bool
 }
 
-func NewSet[v_type SetValueType](list []v_type) *Set[v_type] {
-	s := map[v_type]bool{}
-
-	for _, elem := range list {
-		s[elem] = true
-	}
-
-	return &Set[v_type]{Values: s}
-}
-
-func Intersection[v_type SetValueType](set1 *Set[v_type], set2 *Set[v_type]) int {
-	s_intersection := 0
-
-	for k, _ := range set1.Values {
-		if set2.Values[k] {
-			s_intersection++
-		}
-	}
-
-	return s_intersection
-}
-
-func Union[v_type SetValueType](set1 *Set[v_type], set2 *Set[v_type]) int {
-	s_union := map[v_type]bool{}
-
-	for k, _ := range set1.Values {
-		s_union[k] = true
-	}
-
-	for k, _ := range set2.Values {
-		s_union[k] = true
-	}
-
-	return len(s_union)
-}
-
 func hash(elem string) uint64 {
 	h := fnv.New64()
 	h.Write([]byte(elem))

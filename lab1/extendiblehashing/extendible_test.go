@@ -105,7 +105,8 @@ func TestExtendableHash(t *testing.T) {
 }
 
 func BenchmarkInsert(b *testing.B) {
-	sizes := []int{200, 400, 800}
+	//sizes := []int{200, 400, 800}
+	sizes := []int{1000, 10000, 100000}
 
 	for _, size := range sizes {
 		data := make(map[string]string, size)
@@ -114,11 +115,6 @@ func BenchmarkInsert(b *testing.B) {
 		}
 
 		b.Run(fmt.Sprintf("Insert-%d", size), func(b *testing.B) {
-			// В бенчмарках b.N часто используется для "прогона" несколько раз,
-			// но здесь показываем пример на 1 прогон для наглядности.
-			// Если хотите использовать b.N, можно обернуть цикл в for i := 0; i < b.N; i++ { ... }
-			// и аккумулировать результаты.
-
 			eh := NewExtendableHashTable()
 			durations := make([]time.Duration, 0, size)
 
@@ -140,7 +136,8 @@ func BenchmarkInsert(b *testing.B) {
 }
 
 func BenchmarkGet(b *testing.B) {
-	sizes := []int{200, 400, 800}
+	//sizes := []int{200, 400, 800}
+	sizes := []int{1000, 10000, 100000}
 
 	for _, size := range sizes {
 		// Готовим данные

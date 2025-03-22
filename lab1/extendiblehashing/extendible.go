@@ -3,7 +3,6 @@ package extendablehash
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 )
 
@@ -165,7 +164,7 @@ func (eht *ExtendableHashTable) saveBucketToFile(b *Bucket) {
 		fmt.Println("Ошибка при маршалинге бакета:", err)
 		return
 	}
-	err = ioutil.WriteFile(filePath, data, os.ModePerm)
+	err = os.WriteFile(filePath, data, os.ModePerm)
 	if err != nil {
 		fmt.Println("Ошибка при сохранении бакета:", err)
 	}
@@ -176,7 +175,7 @@ func (eht *ExtendableHashTable) saveBucketToFile(b *Bucket) {
 func (eht *ExtendableHashTable) loadBucketFromFile(dirIndex int) *Bucket {
 	bucket := eht.Buckets[dirIndex]
 	filePath := fmt.Sprintf("%s%d.json", STORAGE_PATH, bucket.Id)
-	data, err := ioutil.ReadFile(filePath)
+	data, err := os.ReadFile(filePath)
 	if err == nil {
 		var b Bucket
 		if err := json.Unmarshal(data, &b); err == nil {
