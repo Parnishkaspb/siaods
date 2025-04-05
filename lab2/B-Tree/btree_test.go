@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+// ---------- CSV Загрузка ----------
+
 func LoadDescriptionsFromCSV(path string) ([]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -24,9 +26,7 @@ func LoadDescriptionsFromCSV(path string) ([]string, error) {
 	}
 
 	var descriptions []string
-	var descIndex int = -1
-
-	// ищем индекс колонки "Description"
+	descIndex := -1
 	for i, header := range records[0] {
 		if strings.ToLower(header) == "description" {
 			descIndex = i
@@ -42,89 +42,69 @@ func LoadDescriptionsFromCSV(path string) ([]string, error) {
 			descriptions = append(descriptions, row[descIndex])
 		}
 	}
-
 	return descriptions, nil
 }
 
-// --- Unit Tests ---
-func TestInsertAndSearch(t *testing.T) {
-	root := &TreeNode[int]{Val: 10}
+// ---------- Unit Tests ----------
 
-	values := []int{5, 15, 3, 7, 13, 20}
+func TestBTree_InsertAndSearch(t *testing.T) {
+	tree := NewBTree[int](2)
+
+	values := []int{10, 20, 5, 6, 12, 30, 7, 17}
 	for _, v := range values {
-		if err := root.Insert(v); err != nil {
-			t.Errorf("Insert(%d) failed: %v", v, err)
+		tree.Insert(v)
+	}
+
+	for _, v := range values {
+		node, i := tree.Root.Search(v)
+		if node == nil || node.Keys[i] != v {
+			t.Errorf("Search(%d) failed", v)
 		}
 	}
+}
 
+func TestBTree_DeleteAndSearch(t *testing.T) {
+	tree := NewBTree[int](2)
+
+	values := []int{10, 20, 5, 6, 12, 30, 7, 17}
 	for _, v := range values {
-		node, err := root.Search(v)
-		if err != nil || node == nil || node.Val != v {
-			t.Errorf("Search(%d) failed, got %v", v, node)
+		tree.Insert(v)
+	}
+
+	toDelete := []int{6, 10, 30}
+	for _, v := range toDelete {
+		tree.Delete(v)
+		node, i := tree.Root.Search(v)
+		if node != nil && i < len(node.Keys) && node.Keys[i] == v {
+			t.Errorf("Delete(%d) failed: still found", v)
 		}
 	}
 }
 
-func TestInsertDuplicate(t *testing.T) {
-	root := &TreeNode[int]{Val: 10}
-	if err := root.Insert(10); err == nil {
-		t.Error("Expected error when inserting duplicate")
+func TestBTree_DuplicateInsert(t *testing.T) {
+	tree := NewBTree[int](2)
+	tree.Insert(10)
+	tree.Insert(10)
+
+	node, idx := tree.Root.Search(10)
+	if node == nil || node.Keys[idx] != 10 {
+		t.Error("Expected to find 10 after duplicate insert")
 	}
 }
 
-func TestDeleteLeafNode(t *testing.T) {
-	root := &TreeNode[int]{Val: 10}
-	root.Insert(5)
-	root.Insert(15)
-	root.Insert(3) // leaf
+func TestBTree_PrintAfterInsert(t *testing.T) {
+	tree := NewBTree[int](2)
 
-	root.Delete(3)
-
-	if _, err := root.Search(3); err == nil {
-		t.Error("Expected error after deleting leaf node")
-	}
-}
-
-func TestDeleteNodeWithOneChild(t *testing.T) {
-	root := &TreeNode[int]{Val: 10}
-	root.Insert(5)
-	root.Insert(3) // left of 5
-
-	root.Delete(5)
-
-	if _, err := root.Search(5); err == nil {
-		t.Error("Expected error after deleting node with one child")
-	}
-}
-
-func TestDeleteNodeWithTwoChildren(t *testing.T) {
-	root := &TreeNode[int]{Val: 10}
-	root.Insert(5)
-	root.Insert(15)
-	root.Insert(3)
-	root.Insert(7)
-
-	root.Delete(5)
-
-	if _, err := root.Search(5); err == nil {
-		t.Error("Expected error after deleting node with two children")
-	}
-}
-
-func TestFindMinMax(t *testing.T) {
-	root := &TreeNode[int]{Val: 10}
-	values := []int{5, 15, 3, 7, 13, 20}
+	values := []int{10, 20, 5, 6, 12, 30, 7, 17}
 	for _, v := range values {
-		root.Insert(v)
+		tree.Insert(v)
 	}
 
-	if min := root.FindMin(); min != 3 {
-		t.Errorf("Expected min = 3, got %v", min)
-	}
-	if max := root.FindMax(); max != 20 {
-		t.Errorf("Expected max = 20, got %v", max)
-	}
+	fmt.Println("Структура дерева после Insert:")
+	tree.Root.Print(0)
 }
+
+// ---------- Вспомогательная функция ----------
 
 func computeStats(durations []time.Duration) (mean, q1, median, q3 time.Duration) {
 	n := len(durations)
@@ -149,8 +129,10 @@ func computeStats(durations []time.Duration) (mean, q1, median, q3 time.Duration
 	return mean, q1, median, q3
 }
 
-func BenchmarkInsertFromCSV(b *testing.B) {
-	sizes := []int{1000, 10000, 100000}
+// ---------- Benchmarks ----------
+
+func BenchmarkBTree_InsertFromCSV(b *testing.B) {
+	sizes := []int{1000, 10000, 100000, 1000000}
 	values, err := LoadDescriptionsFromCSV("EDAresult.csv")
 	if err != nil {
 		b.Fatalf("failed to load CSV: %v", err)
@@ -161,14 +143,15 @@ func BenchmarkInsertFromCSV(b *testing.B) {
 			b.Skipf("CSV does not contain %d entries", size)
 			continue
 		}
+
 		b.Run(fmt.Sprintf("Insert-%d", size), func(b *testing.B) {
 			durations := make([]time.Duration, 0, size)
-			root := &TreeNode[string]{Val: values[0]}
+			tree := NewBTree[string](2)
 
 			startAll := time.Now()
-			for _, val := range values[1:size] {
+			for _, val := range values[:size] {
 				startOp := time.Now()
-				_ = root.Insert(val)
+				tree.Insert(val)
 				durations = append(durations, time.Since(startOp))
 			}
 			total := time.Since(startAll)
@@ -178,7 +161,7 @@ func BenchmarkInsertFromCSV(b *testing.B) {
 	}
 }
 
-func BenchmarkSearchFromCSV(b *testing.B) {
+func BenchmarkBTree_SearchFromCSV(b *testing.B) {
 	sizes := []int{1000, 10000, 100000}
 	values, err := LoadDescriptionsFromCSV("EDAresult.csv")
 	if err != nil {
@@ -190,10 +173,12 @@ func BenchmarkSearchFromCSV(b *testing.B) {
 			b.Skipf("CSV does not contain %d entries", size)
 			continue
 		}
+
 		b.Run(fmt.Sprintf("Search-%d", size), func(b *testing.B) {
-			root := &TreeNode[string]{Val: values[0]}
-			for _, val := range values[1:size] {
-				_ = root.Insert(val)
+			tree := NewBTree[string](2)
+
+			for _, val := range values[:size] {
+				tree.Insert(val)
 			}
 
 			durations := make([]time.Duration, 0, 1000)
@@ -201,7 +186,7 @@ func BenchmarkSearchFromCSV(b *testing.B) {
 			for i := 0; i < 1000; i++ {
 				v := values[i%size]
 				startOp := time.Now()
-				_, _ = root.Search(v)
+				_, _ = tree.Root.Search(v)
 				durations = append(durations, time.Since(startOp))
 			}
 			total := time.Since(startAll)
@@ -211,7 +196,7 @@ func BenchmarkSearchFromCSV(b *testing.B) {
 	}
 }
 
-func BenchmarkDeleteFromCSV(b *testing.B) {
+func BenchmarkBTree_DeleteFromCSV(b *testing.B) {
 	sizes := []int{1000, 10000, 100000}
 	values, err := LoadDescriptionsFromCSV("EDAresult.csv")
 	if err != nil {
@@ -223,17 +208,19 @@ func BenchmarkDeleteFromCSV(b *testing.B) {
 			b.Skipf("CSV does not contain %d entries", size)
 			continue
 		}
+
 		b.Run(fmt.Sprintf("Delete-%d", size), func(b *testing.B) {
-			root := &TreeNode[string]{Val: values[0]}
-			for _, val := range values[1:size] {
-				_ = root.Insert(val)
+			tree := NewBTree[string](2)
+
+			for _, val := range values[:size] {
+				tree.Insert(val)
 			}
 
 			durations := make([]time.Duration, 0, size)
 			startAll := time.Now()
 			for _, val := range values[:size] {
 				startOp := time.Now()
-				root.Delete(val)
+				tree.Delete(val)
 				durations = append(durations, time.Since(startOp))
 			}
 			total := time.Since(startAll)

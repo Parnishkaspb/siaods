@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+func rectsIntersect(a, b Rect) bool {
+	return a.MinX < b.MaxX && a.MaxX > b.MinX &&
+		a.MinY < b.MaxY && a.MaxY > b.MinY
+}
+
 func TestInsertSearchDelete(t *testing.T) {
 	tree := New()
 
@@ -137,8 +142,41 @@ func BenchmarkSearchStats(b *testing.B) {
 	}
 }
 
-func BenchmarkDeleteStats(b *testing.B) {
+func BenchmarkLinearSearchStats(b *testing.B) {
 	sizes := []int{1000, 10000, 100000}
+
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("LinearSearch-%d", size), func(b *testing.B) {
+			items := make([]Item, 0, size)
+			for i := 0; i < size; i++ {
+				x := rand.Float64() * 10000
+				y := rand.Float64() * 10000
+				items = append(items, Item{Rect: Rect{x, y, x + 1, y + 1}, Data: i})
+			}
+
+			durations := make([]time.Duration, 0, 1000)
+			query := Rect{5000, 5000, 5010, 5010}
+			startAll := time.Now()
+			for i := 0; i < 1000; i++ {
+				startOp := time.Now()
+				var _results []Item
+				for _, item := range items {
+					if rectsIntersect(item.Rect, query) {
+						_results = append(_results, item)
+					}
+				}
+				durations = append(durations, time.Since(startOp))
+			}
+			total := time.Since(startAll)
+
+			mean, q1, median, q3 := computeStats(durations)
+			b.Logf("Linear Search %d items: total=%v mean=%v q1=%v median=%v q3=%v", size, total, mean, q1, median, q3)
+		})
+	}
+}
+
+func BenchmarkDeleteStats(b *testing.B) {
+	sizes := []int{1000, 10000}
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("Delete-%d", size), func(b *testing.B) {
@@ -156,7 +194,7 @@ func BenchmarkDeleteStats(b *testing.B) {
 			startAll := time.Now()
 			for _, item := range data {
 				startOp := time.Now()
-				tree.Delete(item.Data)
+				tree.Delete(item)
 				durations = append(durations, time.Since(startOp))
 			}
 			total := time.Since(startAll)
