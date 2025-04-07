@@ -207,7 +207,6 @@ func BenchmarkDeleteStats(b *testing.B) {
 
 func BenchmarkKnnStats(b *testing.B) {
 	sizes := []int{1000, 10000, 100000}
-
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("Knn-%d", size), func(b *testing.B) {
 			tree := New()

@@ -175,7 +175,7 @@ func BenchmarkBTree_SearchFromCSV(b *testing.B) {
 		}
 
 		b.Run(fmt.Sprintf("Search-%d", size), func(b *testing.B) {
-			tree := NewBTree[string](2)
+			tree := NewBTree[string](20)
 
 			for _, val := range values[:size] {
 				tree.Insert(val)
