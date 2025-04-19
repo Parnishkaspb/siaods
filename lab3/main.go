@@ -1,24 +1,53 @@
+// package main
+//
+// import (
+//
+//	"fmt"
+//	"lab3/pkg/file"
+//	"lab3/pkg/index"
+//
+// )
+//
+//	func main() {
+//		dataImpl := file.NewDataImpl()
+//
+//		filename := "EDAResult.csv"
+//
+//		err, filecsv := dataImpl.Read(filename)
+//		if err != nil {
+//			panic(err)
+//		}
+//
+//		err = index.Create(filecsv)
+//		if err != nil {
+//			fmt.Println(err)
+//		}
+//
+//		filter := file.Data{
+//			Description: "earthy berry",
+//			Country:     "US",
+//			Variety:     "Pinot Noir",
+//		}
+//
+//		result, err := index.Search(filter, 2015, 2020)
+//		if err != nil {
+//			fmt.Println(err)
+//		}
+//		index.Print(result)
+//	}
 package main
 
 import (
-	"fmt"
-	"lab3/pkg/file"
+	http2 "lab3/pkg/http"
+	"log"
+	"net/http"
 )
 
 func main() {
-	dataImpl := file.NewDataImpl()
-
-	filename := "EDAResult.csv"
-
-	err, _ := dataImpl.Read(filename)
+	http2.StartServer()
+	log.Println("Сервер запущен на http://localhost:8080")
+	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
-		panic(err)
+		log.Fatal("Ошибка запуска сервера:", err)
 	}
-
-	//for id, d := range dataImpl.Data {
-	//	fmt.Printf("ID: %d, Страна: %s, Сорт: %s\n", id, d.Country, d.Variety)
-	//}
-
-	fmt.Printf("Всего строк в DataSet", len(dataImpl.Data))
-
 }

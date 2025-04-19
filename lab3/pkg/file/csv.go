@@ -77,5 +77,6 @@ func (d *DataImpl) Read(path string) (error, DataImpl) {
 		d.Data[arrayData.ID] = arrayData
 	}
 
+	fmt.Println("выполнено чтение из файла")
 	return nil, *d
 }
