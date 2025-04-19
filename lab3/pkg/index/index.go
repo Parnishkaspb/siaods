@@ -22,18 +22,18 @@ func Create(filecsv file.DataImpl) error {
 		if err != nil {
 			return fmt.Errorf("ошибка при создании индекса: %w", err)
 		}
+
+		for _, doc := range filecsv.Data {
+			fmt.Println(doc.ID)
+			err := index.Index(fmt.Sprintf("%d", doc.ID), doc)
+			if err != nil {
+				return fmt.Errorf("ошибка при индексации документа ID=%d: %w", doc.ID, err)
+			}
+		}
 	} else {
 		index, err = bleve.Open(indexPath)
 		if err != nil {
 			return fmt.Errorf("ошибка при открытии существующего индекса: %w", err)
-		}
-	}
-
-	for _, doc := range filecsv.Data {
-		fmt.Println(doc.ID)
-		err := index.Index(fmt.Sprintf("%d", doc.ID), doc)
-		if err != nil {
-			return fmt.Errorf("ошибка при индексации документа ID=%d: %w", doc.ID, err)
 		}
 	}
 
