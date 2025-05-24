@@ -103,3 +103,15 @@ func StartServer() {
 	startHandler()
 	searchHandler()
 }
+
+
+
+"apple" -> {
+	[doc1 -- DOCID] 1,2,3,4,5 (1,1,1,1,1),
+	freq - 3,
+	norm - 2,
+	loc - 2,3
+}
+
+FST['Apple'] - 1050
+Seg[:]

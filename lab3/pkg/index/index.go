@@ -2,42 +2,57 @@ package index
 
 import (
 	"fmt"
-	"os"
-
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/search/query"
 	"lab3/pkg/file"
+	"os"
 )
 
 var index bleve.Index
 
+var indexPath = "test.bleve"
+
+//var indexPath = "file.bleve"
+
 func Create(filecsv file.DataImpl) error {
 	fmt.Println("начало создание индекса")
 
-	var err error
-	indexPath := "file.bleve"
+	_ = os.RemoveAll(indexPath) // Полное удаление старого индекса
 
-	if _, statErr := os.Stat(indexPath); os.IsNotExist(statErr) {
-		index, err = bleve.New(indexPath, bleve.NewIndexMapping())
-		if err != nil {
-			return fmt.Errorf("ошибка при создании индекса: %w", err)
-		}
+	index, err := bleve.New(indexPath, bleve.NewIndexMapping())
+	if err != nil {
+		return fmt.Errorf("ошибка при создании индекса: %w", err)
+	}
+	defer index.Close()
 
-		for _, doc := range filecsv.Data {
-			fmt.Println(doc.ID)
-			err := index.Index(fmt.Sprintf("%d", doc.ID), doc)
-			if err != nil {
-				return fmt.Errorf("ошибка при индексации документа ID=%d: %w", doc.ID, err)
-			}
-		}
-	} else {
-		index, err = bleve.Open(indexPath)
+	for _, doc := range filecsv.Data {
+		fmt.Println(doc.ID)
+		err := index.Index(fmt.Sprintf("%d", doc.ID), doc)
 		if err != nil {
-			return fmt.Errorf("ошибка при открытии существующего индекса: %w", err)
+			return fmt.Errorf("ошибка при индексации документа ID=%d: %w", doc.ID, err)
 		}
 	}
 
 	fmt.Println("окончание создание индекса")
+	return nil
+}
+
+func CreateInMemory(filecsv file.DataImpl) error {
+	//fmt.Println("начало создание индекса в памяти")
+
+	index, err := bleve.NewMemOnly(bleve.NewIndexMapping())
+	if err != nil {
+		return fmt.Errorf("ошибка при создании in-memory индекса: %w", err)
+	}
+
+	for _, doc := range filecsv.Data {
+		err := index.Index(fmt.Sprintf("%d", doc.ID), doc)
+		if err != nil {
+			return fmt.Errorf("ошибка при индексации документа ID=%d: %w", doc.ID, err)
+		}
+	}
+
+	//fmt.Println("окончание создание индекса в памяти")
 	return nil
 }
 
@@ -47,12 +62,12 @@ func openIndex() error {
 	}
 
 	var err error
-	index, err = bleve.Open("file.bleve")
+	index, err = bleve.Open(indexPath)
 	return err
 }
 
 func Search(filter file.Data, startYear, endYear int) (*bleve.SearchResult, error) {
-	fmt.Println("начало поиска индекса")
+	//fmt.Println("начало поиска индекса")
 	err := openIndex()
 	if err != nil {
 		return nil, fmt.Errorf("ошибка при открытии индекса: %w", err)
@@ -67,7 +82,7 @@ func Search(filter file.Data, startYear, endYear int) (*bleve.SearchResult, erro
 	if err != nil {
 		return nil, fmt.Errorf("ошибка при выполнении поиска: %w", err)
 	}
-	fmt.Println("конец создание индекса")
+	//fmt.Println("конец создание индекса")
 	return searchResult, nil
 }
 

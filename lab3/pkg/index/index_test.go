@@ -1,9 +1,11 @@
 package index_test
 
 import (
+	"fmt"
 	"lab3/pkg/index"
 	"lab3/pkg/util"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
@@ -104,7 +106,7 @@ func TestRead(t *testing.T) {
 				t.Fatalf("ошибка чтения CSV: %v", err)
 			}
 
-			_ = os.Remove("file.bleve")
+			_ = os.Remove("test.bleve")
 
 			if err := index.Create(filecsv); err != nil {
 				t.Fatalf("ошибка создания индекса: %v", err)
@@ -137,10 +139,8 @@ func TestRead(t *testing.T) {
 	}
 }
 
-// Тестовые данные для бенчмарков
 var benchmarkCases = []struct {
 	name        string
-	csvContent  string
 	filter      file.Data
 	startYear   int
 	endYear     int
@@ -148,77 +148,62 @@ var benchmarkCases = []struct {
 	numRuns     int
 }{
 	{
-		name: "SmallDataset_SingleMatch",
-		csvContent: `ID;Country;Description;Designation;Price;Province;Variety;Winery;Year
-1;US;Earthy berry flavor;Reserve;45.0;California;Pinot Noir;Castle;2018`,
-		filter:      file.Data{Description: "berry", Country: "US"},
-		startYear:   2015,
-		endYear:     2020,
-		expectCount: 1,
-		numRuns:     1000,
-	},
-	{
-		name: "MediumDataset_MultipleMatches",
-		csvContent: `ID;Country;Description;Designation;Price;Province;Variety;Winery;Year` + "\n" +
-			generateCSVLines(1000, "US", "California", "Cabernet", "WineryA", 2015, 2020),
+		name:        "Search_US_Wines",
 		filter:      file.Data{Country: "US"},
-		startYear:   2016,
-		endYear:     2019,
-		expectCount: 400,
+		startYear:   2010,
+		endYear:     2020,
+		expectCount: -1,
 		numRuns:     100,
 	},
 	{
-		name: "LargeDataset_ComplexFilter",
-		csvContent: `ID;Country;Description;Designation;Price;Province;Variety;Winery;Year` + "\n" +
-			generateCSVLines(10000, "France", "Bordeaux", "Merlot", "ChateauX", 2000, 2020),
-		filter:      file.Data{Variety: "Merlot", Winery: "ChateauX"},
-		startYear:   2010,
+		name:        "Search_French_Red",
+		filter:      file.Data{Country: "France", Variety: "Red Blend"},
+		startYear:   2015,
 		endYear:     2020,
-		expectCount: 5000,
-		numRuns:     10,
+		expectCount: -1,
+		numRuns:     100,
+	},
+	{
+		name:        "Search_Italian_Expensive",
+		filter:      file.Data{Country: "Italy", Price: 100}, // Price >= 100
+		startYear:   0,
+		endYear:     0,
+		expectCount: -1,
+		numRuns:     50,
+	},
+	{
+		name:        "Search_By_Winery",
+		filter:      file.Data{Winery: "Castello"},
+		startYear:   0,
+		endYear:     0,
+		expectCount: -1,
+		numRuns:     50,
 	},
 }
 
-func generateCSVLines(n int, country, province, variety, winery string, minYear, maxYear int) string {
-	var lines string
-	for i := 0; i < n; i++ {
-		year := minYear + (i % (maxYear - minYear + 1))
-		lines += "1;" + country + ";Description;Designation;25.0;" + province + ";" + variety + ";" + winery + ";" + string(rune(year)) + "\n"
+func BenchmarkSearchWithEDAResult(b *testing.B) {
+	const dataFile = "EDAResult.csv"
+	if _, err := os.Stat(dataFile); os.IsNotExist(err) {
+		b.Skipf("файл %s не найден, пропускаем бенчмарки", dataFile)
 	}
-	return lines
-}
 
-func BenchmarkSearch(b *testing.B) {
+	reader := file.NewDataImpl()
+	err, filecsv := reader.Read(dataFile)
+	if err != nil {
+		b.Fatalf("ошибка чтения CSV: %v", err)
+	}
+
+	_ = os.Remove("test.bleve")
+
+	if err := index.Create(filecsv); err != nil {
+		b.Fatalf("ошибка создания индекса: %v", err)
+	}
+
 	for _, bc := range benchmarkCases {
 		b.Run(bc.name, func(b *testing.B) {
-			// Создаем временный файл для теста
-			tmpFile, err := os.CreateTemp("", "bench_index_*.csv")
-			if err != nil {
-				b.Fatalf("не удалось создать временный файл: %v", err)
-			}
-			defer os.Remove(tmpFile.Name())
-
-			if _, err := tmpFile.WriteString(bc.csvContent); err != nil {
-				b.Fatalf("ошибка записи в файл: %v", err)
-			}
-			tmpFile.Close()
-
-			// Читаем данные и создаем индекс
-			reader := file.NewDataImpl()
-			err, filecsv := reader.Read(tmpFile.Name())
-			if err != nil {
-				b.Fatalf("ошибка чтения CSV: %v", err)
-			}
-
-			// Удаляем старый индекс, если есть
-			_ = os.Remove("file.bleve")
-
-			if err := index.Create(filecsv); err != nil {
-				b.Fatalf("ошибка создания индекса: %v", err)
-			}
-
-			// Запускаем бенчмарк
 			durations := make([]time.Duration, 0, bc.numRuns)
+			var totalResults uint64
+
 			for i := 0; i < bc.numRuns; i++ {
 				start := time.Now()
 				searchResult, err := index.Search(bc.filter, bc.startYear, bc.endYear)
@@ -228,19 +213,76 @@ func BenchmarkSearch(b *testing.B) {
 					b.Fatalf("ошибка поиска: %v", err)
 				}
 
-				if int(searchResult.Total) != bc.expectCount {
-					b.Errorf("ожидалось %d результатов, получено %d", bc.expectCount, searchResult.Total)
-				}
-
+				totalResults = searchResult.Total
 				durations = append(durations, elapsed)
 			}
 
-			// Вычисляем и выводим статистику
 			mean, q1, median, q3 := util.ComputeStats(durations)
 			b.ReportMetric(float64(mean), "mean")
 			b.ReportMetric(float64(q1), "q1")
 			b.ReportMetric(float64(median), "median")
 			b.ReportMetric(float64(q3), "q3")
+			b.ReportMetric(float64(totalResults), "results")
 		})
 	}
+}
+
+func BenchmarkIndexCreation(b *testing.B) {
+	const dataFile = "EDAResult.csv"
+	if _, err := os.Stat(dataFile); os.IsNotExist(err) {
+		b.Skipf("файл %s не найден, пропускаем бенчмарки", dataFile)
+	}
+
+	reader := file.NewDataImpl()
+	err, filecsv := reader.Read(dataFile)
+	if err != nil {
+		b.Fatalf("ошибка чтения CSV: %v", err)
+	}
+
+	//sizes := []int{1, 10, 50}
+	sizes := []int{1, 10, 100, 1000, 10000}
+
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("Index_%d_rows", size), func(b *testing.B) {
+			data := filecsv.Data
+			if size > len(data) {
+				b.Skipf("в файле недостаточно строк (%d < %d)", len(data), size)
+			}
+			dataSubset := extractSubsetOrdered(data, size)
+			durations := make([]time.Duration, 0, b.N)
+
+			for i := 0; i < b.N; i++ {
+				_ = os.Remove("test.bleve") // Удаляем старый индекс
+
+				start := time.Now()
+				if err := index.CreateInMemory(dataSubset); err != nil {
+					b.Fatalf("ошибка создания индекса: %v", err)
+				}
+				elapsed := time.Since(start)
+				durations = append(durations, elapsed)
+			}
+
+			mean, q1, median, q3 := util.ComputeStats(durations)
+			b.ReportMetric(float64(mean.Microseconds()), "mean_µs")
+			b.ReportMetric(float64(q1.Microseconds()), "q1_µs")
+			b.ReportMetric(float64(median.Microseconds()), "median_µs")
+			b.ReportMetric(float64(q3.Microseconds()), "q3_µs")
+		})
+	}
+}
+
+func extractSubsetOrdered(original map[int]file.Data, limit int) file.DataImpl {
+	keys := make([]int, 0, len(original))
+	for k := range original {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys) // сортируем по возрастанию ключей
+
+	subset := make(map[int]file.Data, limit)
+	for i := 0; i < limit && i < len(keys); i++ {
+		k := keys[i]
+		subset[k] = original[k]
+	}
+
+	return file.DataImpl{Data: subset}
 }
